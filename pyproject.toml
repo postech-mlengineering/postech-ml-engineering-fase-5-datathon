@@ -1,0 +1,19 @@
+[project]
+name = "postech-ml-engineering-fase-5-datathon"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "jorgeplatero",email = "jorge.platero@outlook.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pandas (>=3.0.5,<4.0.0)",
+    "jupyter (>=1.1.1,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
