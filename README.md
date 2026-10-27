@@ -1,69 +1,86 @@
-# Datathon Fase 5 - Pós Tech ML Engineering (FIAP)
+# Repositório para o Datathon da Fase 5 da Pós-Graduação em Machine Learning Engineering da FIAP
 
-Repositório do projeto para o datathon da fase 5 da pós-graduação em Machine Learning Engineering da FIAP.
+Este repositório contém a solução desenvolvida para o Datathon da Fase 5, com foco na tomada de decisão automatizada para campanhas de marketing bancário. O projeto implementa um pipeline ponta a ponta com **Multi-Armed Bandit Contextual**, ingestão de variáveis via **Feature Store (Feast)**, rastreamento de ciclo de vida com **MLflow**, orquestração via **Docker Compose**, **API de inferência com FastAPI** e uma interface em **React**.
 
-A ideia do projeto é ajudar um banco a decidir para quais clientes vale a pena oferecer um produto numa campanha de marketing. Em vez de ligar para todo mundo ou seguir regras fixas, usamos um modelo que aprende conforme os clientes vão chegando e só recomenda a oferta quando o retorno esperado compensa.
+A base utilizada é a *Bank Marketing* (Moro et al., 2014). A variável `duration` foi deliberadamente removida do pipeline para mitigar vazamento de dados (*data leakage*), uma vez que sua medição só ocorre após o término do contato.
 
-Para isso montamos um Multi-Armed Bandit contextual (epsilon-greedy) com um `SGDClassifier` treinado de forma incremental. Consideramos que cada cliente que aceita a oferta gera +2,0 de ganho, cada recusa custa -0,5 (ligação, tempo do operador, desgaste com o cliente) e não ofertar não gera nem ganho nem custo. O modelo calcula a probabilidade de aceite e só manda "Ofertar" quando o valor esperado é positivo. Comparamos o resultado com um baseline de regras simples (ofertar para quem já converteu antes, estudantes e aposentados) e com um oráculo, que usamos para calcular o regret.
+---
 
-## O que usamos
+### Modelagem
 
-- **Python 3.11 + Poetry** para o ambiente e as dependências
-- **Polars e Pandas** para carregar e preparar os dados
-- **scikit-learn** para o pipeline de pré-processamento (`StandardScaler` + `OneHotEncoder`) e o `SGDClassifier`
-- **MLflow** para registrar experimentos, métricas, traces e métricas de sistema, para o registry do modelo (alias `champion`) e para servir o modelo
-- **Feast** como feature store (offline em parquet, online em SQLite), com duas versões de feature view
-- **FastAPI** para a API de inferência, com autenticação OAuth2 simples
-- **React + Vite + Tailwind** no frontend do "Motor de Campanha"
-- **Docker Compose** para subir a API, o serving do modelo e a UI do MLflow
+#### Multi-Armed Bandit Contextual (Epsilon-Greedy)
 
-A base usada é a Bank Marketing (Moro et al., 2014). A coluna `duration` foi removida porque só existe depois que a ligação termina, então usar essa coluna seria vazamento de dados.
+Em substituição a abordagens estáticas ou contato indiscriminado com toda a base, implementou-se uma política de exploração e explotação (*epsilon-greedy*) com aprendizado incremental contínuo. 
 
-## Estrutura
+* **Estimador Base:** `SGDClassifier` do *scikit-learn*, atualizado a cada nova observação via `partial_fit`.
+* **Pipeline de Pré-processamento:** Composto por `StandardScaler` para variáveis numéricas e `OneHotEncoder` para variáveis categóricas.
+* **Matriz de Recompensas (Payoff):**
+  * **Aceite da oferta:** $+2,0$
+  * **Recusa da oferta:** $-0,5$ (associado a custos de telefonia, tempo de operação e desgaste de relacionamento com o cliente)
+  * **Não ofertar:** $0,0$ (impacto neutro)
+* **Regra de Decisão:** O modelo calcula a probabilidade de aceite do cliente e aciona a recomendação de oferta exclusivamente quando o valor esperado do retorno for positivo.
 
-```
-.
-├── main.py                 # treino/simulação do bandit e registro no MLflow
-├── data/                   # base original (csv) e parquet usado pelo Feast
-├── feature_repo/           # configuração do Feast e feature views (v1 e v2)
-├── backend/api/            # API FastAPI + Dockerfile
-├── frontend/               # interface web em React
-├── notebooks/eda.ipynb     # análise exploratória e primeiros testes
-├── docs/                   # enunciado do datathon
-├── Dockerfile.mlflow       # imagem que serve o modelo pelo MLflow
-└── docker-compose.yml
-```
+#### Linha de Base (Baseline)
 
-Sobre as feature views: a `bank_features` (v1) tem todas as colunas, e a `bank_features_v2` tira `month` e `day_of_week`. O `main.py` treina as duas versões e a API usa a v2 por padrão.
+Utilizado como referência comparativa heurística, aplicando a política de ofertar estritamente para perfis historicamente mais propensos à conversão: clientes com conversões em campanhas anteriores, estudantes e aposentados.
 
-## Como executar
+#### Oráculo e Regret
+
+Para mensurar a eficácia da política contextual frente ao cenário teórico ideal, foi implementado um oráculo com conhecimento a posteriori da decisão ótima para cada cliente. Essa comparação viabiliza o cálculo analítico do *regret* acumulado da estratégia ao longo do tempo.
+
+#### Feature Store (Feast)
+
+O pipeline de dados opera com o Feast para servir variáveis tanto no treino quanto na inferência:
+* **Armazenamento Offline:** Arquivos Parquet locais (`data/`).
+* **Armazenamento Online:** SQLite (`data/online_store.db`).
+* **Versões de Feature Views:**
+  * `bank_features` (v1): Contempla o conjunto integral de atributos.
+  * `bank_features_v2` (v2): Exclui as variáveis temporais `month` e `day_of_week`. A API utiliza esta versão como padrão.
+
+---
 
 ### Pré-requisitos
 
-- Python 3.11
-- Poetry
-- Docker e Docker Compose
-- Node 18+ (para o frontend)
+Certifique-se de possuir as seguintes ferramentas instaladas em seu ambiente:
 
-### 1. Instalar as dependências
+* **Python:** Versão `>=3.11` e `<3.13`
+* **Poetry:** Gerenciador de ambientes e dependências Python
+* **Docker e Docker Compose:** Para execução dos serviços conteinerizados
+* **Node.js:** Versão `18+` (para execução local do frontend)
+
+---
+
+### Instalação
+
+Clone o repositório e configure as dependências com o Poetry:
 
 ```bash
+git clone https://github.com/postech-mlengineering/postech-ml-engineering-fase-5-datathon.git
+cd postech-ml-engineering-fase-5-datathon
 poetry install
 ```
 
-### 2. Treinar o modelo
+---
+
+### Como Executar
+
+#### 1. Treinamento e Simulação
+
+Executa a leitura dos dados brutos, geração das bases analíticas, treino do modelo incremental e persistência dos experimentos no MLflow:
 
 ```bash
 poetry run python main.py
 ```
 
-Esse script:
-- lê o `data/bank-additional-full.csv`;
-- gera o `data/bank-additional-full.parquet` (com `client_id` e `event_timestamp`), que o Feast usa;
-- roda a simulação para as duas versões de features e registra tudo no MLflow (`mlflow.db` e pasta `mlruns/`);
-- registra o modelo como `bank_marketing_model` e aponta o alias `champion` para a última versão.
+O script realiza as seguintes etapas:
+1. Leitura de `data/bank-additional-full.csv`.
+2. Geração do arquivo `data/bank-additional-full.parquet` com campos de governança (`client_id` e `event_timestamp`).
+3. Execução da simulação para as versões v1 e v2 das *feature views*, registrando métricas no MLflow.
+4. Registro do modelo como `bank_marketing_model` com definição do alias `champion`.
 
-### 3. Preparar o Feast
+#### 2. Configuração e Materialização da Feature Store
+
+Registra as definições das entidades e carrega os dados no repositório online:
 
 ```bash
 cd feature_repo
@@ -72,25 +89,29 @@ poetry run feast materialize-incremental $(date -u +"%Y-%m-%dT%H:%M:%S")
 cd ..
 ```
 
-O `apply` registra as feature views e o `materialize` carrega os dados no online store (`data/online_store.db`).
+#### 3. Execução dos Serviços via Docker Compose
 
-### 4. Subir os serviços
+Inicia os containers da API de inferência, serving do MLflow e UI de monitoramento:
 
 ```bash
 docker compose up --build
 ```
 
-Esse comando sobe três containers:
+Serviços inicializados:
 
-| Serviço        | Porta | O que faz                                         |
-|----------------|-------|---------------------------------------------------|
-| `fastapi_app`  | 8000  | API de inferência                                 |
-| `mlflow_serve` | 5002  | serve o `models:/bank_marketing_model@champion`   |
-| `mlflow_ui`    | 5000  | interface do MLflow para ver runs e métricas      |
+| Serviço | Porta | Descrição |
+|---|---|---|
+| `fastapi_app` | 8000 | API RESTful de inferência e recomendações |
+| `mlflow_serve` | 5002 | Servidor de predição do MLflow (`bank_marketing_model@champion`) |
+| `mlflow_ui` | 5000 | Interface visual do MLflow para consulta de runs, traces e métricas |
 
-Rode os passos 2 e 3 antes do build, porque a API lê o `feature_repo` e o `data` que são copiados para dentro da imagem.
+> **Nota:** Certifique-se de executar as etapas 1 e 2 antes do build do Docker, pois os artefatos de dados e repositório de features são copiados para a imagem.
 
-### 5. Rodar o frontend
+---
+
+### Interface Web (Frontend)
+
+O projeto disponibiliza uma interface visual ("Motor de Campanha") construída em React, Vite e Tailwind CSS.
 
 ```bash
 cd frontend
@@ -98,45 +119,43 @@ npm install
 npm run dev
 ```
 
-O Vite está configurado na porta 80. **No Linux**, portas abaixo de 1024 só podem ser abertas pelo root, então o `npm run dev` falha com:
-
-```
-Error: listen EACCES: permission denied 0.0.0.0:80
-```
-
-Nesse caso, suba em outra porta:
-
+* O Vite está pré-configurado na porta `80`. Em ambientes Linux sem privilégios de root, execute em porta alternativa:
 ```bash
 npm run dev -- --port 5173
 ```
+* **Credenciais de acesso para demonstração:** Usuário `admin` | Senha `password123`.
 
-Não é recomendado usar `sudo npm run dev`: o processo inteiro rodaria como root e os arquivos gerados ficariam com dono root.
+---
 
-O login é `admin` / `password123`.
+### Endereços de Acesso
 
-### Endereços
+* **Frontend:** `http://localhost` (ou `http://localhost:5173`)
+* **Documentação da API (Swagger):** `http://localhost:8000/docs`
+* **MLflow UI:** `http://localhost:5000`
 
-- Frontend: http://localhost (ou http://localhost:5173)
-- Documentação da API: http://localhost:8000/docs
-- MLflow: http://localhost:5000
+---
 
-## Testando a API direto
+### Testando a API de Inferência
 
-Primeiro pegue o token:
+#### 1. Obtenção do Token de Acesso
 
 ```bash
 curl -X POST http://localhost:8000/token \
   -d "username=admin&password=password123"
 ```
 
-Previsão para um cliente específico:
+#### 2. Inferência por Cliente
+
+Retorna a probabilidade de aceite, valor esperado e decisão de oferta para um cliente específico:
 
 ```bash
 curl -X POST "http://localhost:8000/predict?client_id=10" \
   -H "Authorization: Bearer admin"
 ```
 
-Lista dos clientes recomendados para a campanha, ordenados pelo valor esperado (`top_n: 0` retorna todos):
+#### 3. Recomendações em Lote
+
+Retorna os clientes recomendados, ordenados por valor esperado decrescente (`top_n: 0` processa todos):
 
 ```bash
 curl -X POST http://localhost:8000/recommendations \
@@ -145,20 +164,92 @@ curl -X POST http://localhost:8000/recommendations \
   -d '{"top_n": 20}'
 ```
 
-Cada chamada também gera um run no experimento `bank_marketing_bandit` do MLflow, com a latência, a probabilidade, o valor esperado e a decisão.
+> Cada chamada realizada à API registra um *run* no experimento `bank_marketing_bandit` do MLflow contendo latência, probabilidades e métricas operacionais.
 
-## ARQUITETURA ALVO EM NUVEM (AWS) 
+---
 
-Usaríamos a AWS. Como a API, o serving do modelo e a UI do MLflow já estão em containers, as imagens iriam para o **Amazon ECR** e rodariam em maquina **Amazon ECS**, sem precisar gerenciar servidor, atrás de um **Application Load Balancer** com HTTPS. O frontend em React é só um site estático depois do `npm run build`, então ficaria num bucket **S3** servido pelo **CloudFront**. Os dados (csv/parquet do Feast) e os artefatos do MLflow (pasta `mlruns/`) também iriam para o **S3**, e o `mlflow.db` em SQLite seria trocado por um PostgreSQL no **Amazon RDS**, para vários containers poderem ler e escrever ao mesmo tempo.
+### Arquitetura Alvo em Nuvem (AWS)
 
-No Feast, o offline store continuaria lendo o parquet do S3 e o online store sairia do SQLite para o **DynamoDB** (ou Redis no **ElastiCache**), que aguenta as consultas da API com baixa latência. Senhas e chaves ficariam no **Secrets Manager**, os logs e alertas no **CloudWatch**, e o retreino do bandit (`main.py`) e o `feast materialize` poderiam rodar periodicamente como tarefas agendadas pelo **EventBridge** no próprio ECS. O deploy seria automatizado com **GitHub Actions**, que builda as imagens, envia para o ECR e atualiza os serviços a cada push na `main`.
+Para implantação em ambiente produtivo na AWS, adota-se a seguinte divisão de componentes e serviços gerenciados:
 
-## Observações
+* **Computação e Orquestração:** As imagens Docker dos serviços (`fastapi_app`, `mlflow_serve` e `mlflow_ui`) armazenadas no **Amazon ECR** e executadas via **Amazon ECS** sob instâncias gerenciadas, com tráfego distribuído por um **Application Load Balancer (ALB)** com terminação HTTPS.
+* **Frontend:** Build estático do React armazenado em bucket **Amazon S3** e distribuído globalmente via **Amazon CloudFront**.
+* **Armazenamento de Metadados e Modelos:** Backend do MLflow migrado de SQLite para **Amazon RDS (PostgreSQL)**; artefatos de modelos e datasets Parquet persistidos no **Amazon S3**.
+* **Feature Store Online:** Migração do online store local para **Amazon DynamoDB** (ou **Amazon ElastiCache / Redis**) para garantir baixa latência nas leituras online.
+* **Segurança e Governança:** Credenciais e tokens centralizados no **AWS Secrets Manager**, com logs e métricas estruturadas no **Amazon CloudWatch**.
+* **Rotinas Agendadas e CI/CD:** Atualizações periódicas do modelo (`main.py`) e materialização do Feast disparadas via **Amazon EventBridge** em tarefas ECS; pipeline de integração contínua implementado via **GitHub Actions**.
 
-- Para trocar a feature view usada pela API, defina `FEATURE_VIEW_NAME` (`bank_features` ou `bank_features_v2`) no serviço `fastapi_app`.
-- Os arquivos `.db` (MLflow e Feast) estão no `.gitignore`. Por isso, num clone novo, é preciso rodar os passos 2 e 3.
-- A autenticação é só para demonstração: o usuário está fixo no código e o token é o próprio nome de usuário.
+---
 
-## Referência da base
+### Notebooks
+
+O notebook com a análise exploratória dos dados e testes preliminares localiza-se em `notebooks/eda.ipynb`. Para executá-lo:
+
+```bash
+poetry run jupyter notebook
+```
+
+---
+
+### Tecnologias
+
+| Componente | Tecnologia | Versão | Descrição |
+|---|---|---|---|
+| Linguagem | Python | `>=3.11,<3.13` | Linguagem para desenvolvimento de scripts e modelos |
+| Gerenciamento | Poetry | `>=2.0.0` | Gerenciador de dependências e ambientes virtuais |
+| Manipulação de Dados | Polars | `>=1.0.0` | Biblioteca de alta performance para manipulação de dados |
+| Manipulação de Dados | Pandas | `>=2.0.0` | Biblioteca para manipulação e análise de dados tabulares |
+| Machine Learning | Scikit-learn | `>=1.3.0` | Biblioteca para pré-processamento e treinamento de ML |
+| MLOps / Rastreamento | MLflow | `>=2.14.0` | Rastreamento de experimentos, métricas, artefatos e serving |
+| Feature Store | Feast | `==0.38.0` | Armazenamento e disponibilização de features offline e online |
+| API / Framework | FastAPI | `>=0.100.0` | Framework assíncrono para desenvolvimento da API |
+| Servidor ASGI | Uvicorn | `>=0.23.0` | Servidor ASGI para execução da aplicação FastAPI |
+| Segurança / Autenticação | Python-Jose | `>=3.3.0` | Biblioteca para implementação de tokens de autenticação |
+| Segurança / Hashing | Passlib | `>=1.7.4` | Biblioteca para controle e verificação de senhas |
+| Visualização | Matplotlib | `>=3.7.0` | Biblioteca para criação de gráficos estáticos |
+| Monitoramento | psutil | `>=5.9.0` | Biblioteca para coleta de métricas de uso de hardware e sistema |
+| Serialização | Protobuf | `==4.25.3` | Protocolo para serialização de dados estruturados |
+| Frontend | React + Vite + Tailwind | `-` | Interface web para visualização e operação da campanha |
+| Conteinerização | Docker / Compose | `-` | Padronização e orquestração de containers de serviço |
+
+---
+
+### Estrutura do Projeto
+
+```
+.
+├── backend/
+│   └── api/                # Ponto de entrada da API FastAPI e Dockerfile
+├── data/                   # Arquivos CSV brutos, base Parquet e SQLite online
+├── docs/                   # Enunciado do projeto e documentações de apoio
+├── feature_repo/           # Definições das entidades e feature views do Feast
+├── frontend/               # Código-fonte da aplicação React (Vite + Tailwind)
+├── notebooks/              # Análise exploratória dos dados (eda.ipynb)
+├── Dockerfile.mlflow       # Imagem Docker dedicada ao serving de modelos no MLflow
+├── docker-compose.yml      # Definição e orquestração dos serviços
+├── main.py                 # Pipeline de treino, simulação do bandit e tracking
+├── pyproject.toml          # Configuração do Poetry e dependências do projeto
+└── README.md
+```
+
+---
+
+### Observações
+
+* **Seleção de Feature Views:** Para alternar a versão utilizada pela API, configure a variável de ambiente `FEATURE_VIEW_NAME` (`bank_features` ou `bank_features_v2`) no container `fastapi_app`.
+* **Persistência de Dados Locais:** Os arquivos de banco de dados SQLite (`.db`) estão incluídos no `.gitignore`. Por esse motivo, é mandatório executar as etapas de treino e materialização do Feast ao clonar o projeto em um novo ambiente.
+* **Autenticação:** O mecanismo de autenticação presente na API possui fins exclusivamente demonstrativos, com credenciais estáticas de desenvolvimento.
+
+---
+
+### Referência da Base
 
 S. Moro, P. Cortez e P. Rita. *A Data-Driven Approach to Predict the Success of Bank Telemarketing*. Decision Support Systems, 2014. http://dx.doi.org/10.1016/j.dss.2014.03.001
+
+## Colaboradores
+
+[Jorge Platero](https://github.com/jorgeplatero)
+
+[Leandro Delisposti](https://github.com/LeandroDelisposti)
+
+[Hugo Rodrigues](https://github.com/Nokard)
